@@ -1,3 +1,5 @@
+A-single-stage-pipeline-register
+
 1. Handshake Protocol
 Input interface: in_valid && in_ready triggers data capture
 Output interface: out_valid && out_ready triggers data release
