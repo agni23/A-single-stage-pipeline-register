@@ -1,0 +1,139 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 05.02.2026 12:45:50
+// Design Name: 
+// Module Name: pipeline_register
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module pipeline_register #(
+    parameter WIDTH = 32          // Width of data bus (default 32 bits)
+) (
+    input  logic             clk,        // Clock
+    input  logic             rst_n,      // Active-low synchronous reset
+    input  logic             in_valid,   // Input data valid
+    output logic             in_ready,   // Ready to accept input data
+    input  logic [WIDTH-1:0] in_data,    // Input data bus
+    output logic             out_valid,  // Output data valid
+    input  logic             out_ready,  // Downstream ready to accept output
+    output logic [WIDTH-1:0] out_data    // Output data bus
+);
+
+    // Internal state register
+    logic             reg_valid;
+    logic [WIDTH-1:0] reg_data;
+
+    // Combinational control logic
+    always_comb begin
+        // Input ready: we can accept new data when either:
+        // 1. We're empty (reg_valid == 0), OR
+        // 2. We're full but downstream is ready to take our data
+        in_ready = ~reg_valid | (reg_valid & out_ready);
+        
+        // Output valid is just the state of our register
+        out_valid = reg_valid;
+        out_data  = reg_data;
+    end
+
+    // Sequential state update
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            // Reset to empty state
+            reg_valid <= 1'b0;
+            reg_data  <= {WIDTH{1'b0}};  // Optional: reset data for predictability
+        end else begin
+            // Handle handshake on input side
+            if (in_valid && in_ready) begin
+                // Capture new data
+                reg_valid <= 1'b1;
+                reg_data  <= in_data;
+            end
+            // Handle handshake on output side
+            else if (out_valid && out_ready) begin
+                // Data was taken downstream, clear our register
+                reg_valid <= 1'b0;
+                // Note: Data register holds its value but won't be used
+                // since reg_valid = 0 makes output invalid
+            end
+            // If neither handshake occurs, state remains unchanged
+        end
+    end
+
+    // Alternative implementation using a single always_comb for state machine
+    // (This version might be preferred for clarity in some designs)
+    /*
+    // State encoding: 0=empty, 1=full
+    logic state;
+    
+    always_ff @(posedge clk) begin
+        if (!rst_n) begin
+            state <= 1'b0;
+            reg_data <= {WIDTH{1'b0}};
+        end else begin
+            case (state)
+                1'b0: begin // Empty state
+                    if (in_valid) begin
+                        state <= 1'b1;
+                        reg_data <= in_data;
+                    end
+                end
+                1'b1: begin // Full state
+                    if (out_ready) begin
+                        if (in_valid) begin
+                            // Pass-through: stay full with new data
+                            reg_data <= in_data;
+                        end else begin
+                            // Release data, become empty
+                            state <= 1'b0;
+                        end
+                    end
+                end
+            endcase
+        end
+    end
+    */
+
+    // Assertions for verification (synthesize to nothing, for simulation)
+    // pragma translate_off
+    `ifndef SYNTHESIS
+    // Check that data is never lost
+    property p_no_data_loss;
+        @(posedge clk) disable iff (!rst_n)
+        (reg_valid && in_valid && !in_ready) |=> reg_valid;
+    endproperty
+    assert property (p_no_data_loss) 
+        else $error("Data loss detected!");
+    
+    // Check that data is never duplicated
+    property p_no_data_duplication;
+        @(posedge clk) disable iff (!rst_n)
+        (reg_valid && out_ready) |=> $stable(out_data) || !reg_valid;
+    endproperty
+    assert property (p_no_data_duplication)
+        else $error("Data duplication detected!");
+    
+    // Valid/ready handshake protocol checker
+    property p_valid_ready_protocol;
+        @(posedge clk) disable iff (!rst_n)
+        in_valid && !in_ready |=> in_valid;
+    endproperty
+    assert property (p_valid_ready_protocol)
+        else $error("Valid dropped before handshake!");
+    `endif
+    // pragma translate_on
+
+endmodule
